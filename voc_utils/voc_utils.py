@@ -8,10 +8,73 @@ import skimage
 from skimage import io
 
 
-root_dir = '/Users/mprat/personal/VOCdevkit/VOCdevkit/VOC2012/'
-img_dir = os.path.join(root_dir, 'JPEGImages/')
-ann_dir = os.path.join(root_dir, 'Annotations')
-set_dir = os.path.join(root_dir, 'ImageSets', 'Main')
+def _mkdir_p(path):
+    os.makedirs(path, exist_ok=True)
+
+
+class VOCDirsObj(object):
+    def __init__(self):
+        self.__root_dir = None
+
+    def _get_err_string(self):
+        return 'Need to set the location of the PASCAL VOC2012 dataset ' + \
+               'first. Call voc_utils.set_rootdir(path) to do this.'
+
+    @property
+    def root_dir(self):
+        return self.__root_dir
+
+    @root_dir.setter
+    def root_dir(self, val):
+        self.__root_dir = val
+
+    @property
+    def csvs_dir(self):
+        try:
+            csvdir = os.path.join(self.root_dir, 'csvs')
+            if not os.path.exists(csvdir):
+                _mkdir_p(csvdir)
+            return csvdir
+        except:
+            raise ValueError(self._get_err_string())
+
+    @property
+    def img_dir(self):
+        try:
+            return os.path.join(self.root_dir, 'JPEGImages')
+        except:
+            raise ValueError(self._get_err_string())
+
+    @property
+    def ann_dir(self):
+        try:
+            return os.path.join(self.root_dir, 'Annotations')
+        except:
+            raise ValueError(self._get_err_string())
+
+    @property
+    def set_dir(self):
+        try:
+            return os.path.join(self.root_dir, 'ImageSets', 'Main')
+        except:
+            raise ValueError(self._get_err_string())
+
+
+# Create an instance of the dirs object
+VOCDirs = VOCDirsObj()
+
+
+def set_rootdir(root):
+    """Set the root directory of the PASCAL VOC dataset.
+
+    This should be the folder which contains the subfolders:
+
+    - Annotations
+    - ImageSets
+    - JPEGImages
+    - ...
+    """
+    VOCDirs.root_dir = root
 
 
 def list_image_sets():
@@ -39,7 +102,7 @@ def imgs_from_category(cat_name, dataset):
     Returns:
         pandas dataframe: pandas DataFrame of all filenames from that category
     """
-    filename = os.path.join(set_dir, cat_name + "_" + dataset + ".txt")
+    filename = os.path.join(VOCDirs.set_dir, cat_name + "_" + dataset + ".txt")
     df = pd.read_csv(
         filename,
         delim_whitespace=True,
@@ -76,7 +139,7 @@ def annotation_file_from_img(img_name):
     Returns:
         string: file path to the annotation file
     """
-    return os.path.join(ann_dir, img_name) + '.xml'
+    return os.path.join(VOCDirs.ann_dir, img_name) + '.xml'
 
 
 def load_annotation(img_filename):
@@ -95,7 +158,7 @@ def load_annotation(img_filename):
     with open(annotation_file_from_img(img_filename)) as f:
         xml = f.readlines()
     xml = ''.join([line.strip('\t') for line in xml])
-    return BeautifulSoup(xml)
+    return BeautifulSoup(xml, "html5lib")
 
 
 # TODO: implement this
@@ -118,9 +181,10 @@ def load_img(img_filename):
     Returns:
         np array of float32: an image as a numpy array of float32
     """
-    img_filename = os.path.join(img_dir, img_filename + '.jpg')
-    img = skimage.img_as_float(io.imread(
-        img_filename)).astype(np.float32)
+    #  fullname = os.path.join(
+        #  VOCDirs.img_dir, os.path.splitext(img_filename)[0] + '.jpg')
+    fullname = img_filename
+    img = skimage.img_as_float(io.imread(fullname)).astype(np.float32)
     if img.ndim == 2:
         img = img[:, :, np.newaxis]
     elif img.shape[2] == 4:
@@ -160,35 +224,41 @@ def _load_data(category, data_type=None):
     if data_type is None:
         raise ValueError('Must provide data_type = train or val')
     to_find = category
-    filename = os.path.join(root_dir, 'csvs/') + \
-        data_type + '_' + \
-        category + '.csv'
+    filename = os.path.join(
+        VOCDirs.csvs_dir, data_type + '_' + category + '.csv')
+
+    # If the csv file has been created before, just load it. Otherwise create it
     if os.path.isfile(filename):
         return pd.read_csv(filename)
     else:
-        train_img_list = imgs_from_category_as_list(to_find, data_type)
-        data = []
-        for item in train_img_list:
-            anno = load_annotation(item)
-            objs = anno.findAll('object')
-            for obj in objs:
-                obj_names = obj.findChildren('name')
-                for name_tag in obj_names:
-                    if str(name_tag.contents[0]) == category:
-                        fname = anno.findChild('filename').contents[0]
-                        bbox = obj.findChildren('bndbox')[0]
-                        xmin = int(bbox.findChildren('xmin')[0].contents[0])
-                        ymin = int(bbox.findChildren('ymin')[0].contents[0])
-                        xmax = int(bbox.findChildren('xmax')[0].contents[0])
-                        ymax = int(bbox.findChildren('ymax')[0].contents[0])
-                        data.append([fname, xmin, ymin, xmax, ymax])
-        df = pd.DataFrame(
-            data, columns=['fname', 'xmin', 'ymin', 'xmax', 'ymax'])
-        df.to_csv(filename)
+        df = _create_csv_file(to_find, data_type)
         return df
 
 
-def get_image_url_list(category, data_type=None):
+def _create_csv_file(category, data_type):
+    train_img_list = imgs_from_category_as_list(to_find, data_type)
+    data = []
+    for item in train_img_list:
+        anno = load_annotation(item)
+        objs = anno.findAll('object')
+        for obj in objs:
+            obj_names = obj.findChildren('name')
+            for name_tag in obj_names:
+                if str(name_tag.contents[0]) == category:
+                    fname = anno.findChild('filename').contents[0]
+                    bbox = obj.findChildren('bndbox')[0]
+                    xmin = int(bbox.findChildren('xmin')[0].contents[0])
+                    ymin = int(bbox.findChildren('ymin')[0].contents[0])
+                    xmax = int(bbox.findChildren('xmax')[0].contents[0])
+                    ymax = int(bbox.findChildren('ymax')[0].contents[0])
+                    data.append([fname, xmin, ymin, xmax, ymax])
+    df = pd.DataFrame(
+        data, columns=['fname', 'xmin', 'ymin', 'xmax', 'ymax'])
+    df.to_csv(filename)
+    return df
+
+
+def get_image_path_list(category, data_type=None):
     """
     For a given data type, returns a list of filenames.
 
@@ -200,9 +270,11 @@ def get_image_url_list(category, data_type=None):
         list of strings: list of all filenames for that particular category
     """
     df = _load_data(category, data_type=data_type)
-    image_url_list = list(
-        unique_everseen(list(img_dir + df['fname'])))
-    return image_url_list
+    image_path_list = [
+        os.path.join(VOCDirs.img_dir, x['fname']) for _, x in df.iterrows()]
+    #  image_path_list = list(
+        #  unique_everseen(list(VOCDirs.img_dir + df['fname'])))
+    return image_path_list
 
 
 def get_masks(cat_name, data_type, mask_type=None):
@@ -235,7 +307,7 @@ def get_masks(cat_name, data_type, mask_type=None):
     prev_url = ""
     blank_img = None
     for row_num, entry in df.iterrows():
-        img_url = os.path.join(img_dir, entry['fname'])
+        img_url = os.path.join(VOCDirs.img_dir, entry['fname'])
         if img_url != prev_url:
             if blank_img is not None:
                 # TODO: options for how to process the masks
@@ -287,9 +359,9 @@ def get_imgs(cat_name, data_type=None):
         np array of images: np array of loaded images for the category
             and data_type.
     """
-    image_url_list = get_image_url_list(cat_name, data_type=data_type)
+    image_path_list = get_image_path_list(cat_name, data_type=data_type)
     imgs = []
-    for url in image_url_list:
+    for url in image_path_list:
         imgs.append(load_img(url))
     return np.array(imgs)
 
@@ -378,7 +450,7 @@ def load_data_multilabel(data_type=None):
     """
     if data_type is None:
         raise ValueError('Must provide data_type = train or val')
-    filename = os.path.join(set_dir, data_type + ".txt")
+    filename = os.path.join(VOCDirs.set_dir, data_type + ".txt")
     cat_list = list_image_sets()
     df = pd.read_csv(
         filename,
