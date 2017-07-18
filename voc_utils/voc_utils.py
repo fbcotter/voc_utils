@@ -231,12 +231,12 @@ def _load_data(category, data_type=None):
     if os.path.isfile(filename):
         return pd.read_csv(filename)
     else:
-        df = _create_csv_file(to_find, data_type)
+        df = _create_csv_file(to_find, data_type, filename)
         return df
 
 
-def _create_csv_file(category, data_type):
-    train_img_list = imgs_from_category_as_list(to_find, data_type)
+def _create_csv_file(category, data_type, filename):
+    train_img_list = imgs_from_category_as_list(category, data_type)
     data = []
     for item in train_img_list:
         anno = load_annotation(item)
